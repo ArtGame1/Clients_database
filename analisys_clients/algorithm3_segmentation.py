@@ -140,6 +140,7 @@ class RFMSegmentationApp:
         buttons = [
             ("🔄 Выполнить сегментацию", self.perform_segmentation, "Blue.TButton"),
             ("📊 Диаграмма сегментов", self.show_segments_chart, "Blue.TButton"),
+            ("💰 График расходов", self.show_expenses_chart, "Blue.TButton"),
             ("👑 VIP Клиенты", self.show_vip_clients, "Green.TButton"),
             ("📈 ТОП-20 клиентов", self.show_top_clients, "Green.TButton"),
             ("📋 Экспорт данных", self.export_data, "Red.TButton"),
@@ -523,6 +524,122 @@ class RFMSegmentationApp:
 
         except Exception as e:
             messagebox.showerror("Ошибка", f"Не удалось построить график:\n{str(e)}")
+
+    def show_expenses_chart(self):
+        """Показать график расходов клиентов (ТОП-20 по сумме покупок)"""
+        try:
+            # Получаем данные о расходах клиентов
+            query = """
+            SELECT 
+                c.name,
+                ROUND(COALESCE(SUM(o.amount), 0)) as total_amount,
+                COUNT(o.order_id) as order_count
+            FROM customers c
+            LEFT JOIN orders o ON c.customer_id = o.customer_id
+            GROUP BY c.customer_id
+            HAVING total_amount > 0
+            ORDER BY total_amount DESC
+            LIMIT 20
+            """
+
+            self.cursor.execute(query)
+            expenses_data = self.cursor.fetchall()
+
+            if not expenses_data:
+                messagebox.showwarning("Нет данных", "Нет данных о расходах клиентов")
+                return
+
+            # Создаем окно для графика
+            chart_window = tk.Toplevel(self.root)
+            chart_window.title("ТОП-20 клиентов по сумме расходов")
+            chart_window.geometry("900x600")
+
+            # Центрируем окно
+            chart_window.update_idletasks()
+            width = 900
+            height = 600
+            x = (chart_window.winfo_screenwidth() // 2) - (width // 2)
+            y = (chart_window.winfo_screenheight() // 2) - (height // 2)
+            chart_window.geometry(f'{width}x{height}+{x}+{y}')
+
+            # Подготавливаем данные
+            names = [row[0] for row in expenses_data]
+            amounts = [row[1] for row in expenses_data]
+            orders = [row[2] for row in expenses_data]
+
+            # Сокращаем длинные имена
+            names = [name[:15] + "..." if len(name) > 15 else name for name in names]
+
+            # Создаем фигуру с двумя подграфиками
+            fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 8))
+
+            # График 1: Столбчатая диаграмма сумм расходов
+            colors = plt.cm.RdYlGn_r([x / max(amounts) for x in amounts])
+            bars1 = ax1.bar(range(len(names)), amounts, color=colors, edgecolor='black', alpha=0.8)
+            ax1.set_title('ТОП-20 клиентов по сумме расходов', fontsize=14, fontweight='bold')
+            ax1.set_xlabel('Клиент')
+            ax1.set_ylabel('Сумма расходов (₽)')
+            ax1.set_xticks(range(len(names)))
+            ax1.set_xticklabels(names, rotation=45, ha='right')
+            ax1.grid(True, alpha=0.3, axis='y')
+
+            # Добавляем значения над столбцами
+            for bar, amount in zip(bars1, amounts):
+                height = bar.get_height()
+                ax1.text(bar.get_x() + bar.get_width() / 2., height + 500,
+                         f'{amount:,.0f} ₽', ha='center', va='bottom',
+                         fontsize=8, rotation=0, fontweight='bold')
+
+            # График 2: Количество заказов
+            bars2 = ax2.bar(range(len(names)), orders, color='steelblue', edgecolor='black', alpha=0.7)
+            ax2.set_title('Количество заказов по клиентам', fontsize=14, fontweight='bold')
+            ax2.set_xlabel('Клиент')
+            ax2.set_ylabel('Количество заказов')
+            ax2.set_xticks(range(len(names)))
+            ax2.set_xticklabels(names, rotation=45, ha='right')
+            ax2.grid(True, alpha=0.3, axis='y')
+
+            # Добавляем значения над столбцами
+            for bar, order in zip(bars2, orders):
+                height = bar.get_height()
+                ax2.text(bar.get_x() + bar.get_width() / 2., height + 0.2,
+                         f'{order}', ha='center', va='bottom', fontsize=9, fontweight='bold')
+
+            plt.tight_layout()
+
+            # Встраиваем в Tkinter
+            canvas = FigureCanvasTkAgg(fig, master=chart_window)
+            canvas.draw()
+            canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+
+            # Кнопки управления
+            button_frame = ttk.Frame(chart_window)
+            button_frame.pack(pady=10)
+
+            ttk.Button(button_frame, text="Закрыть",
+                       command=chart_window.destroy).pack(side=tk.LEFT, padx=5)
+
+            ttk.Button(button_frame, text="💾 Сохранить график",
+                       command=lambda: self.save_figure(fig, "expenses_chart")).pack(side=tk.LEFT, padx=5)
+
+            # Статистика
+            total_expenses = sum(amounts)
+            avg_expense = total_expenses / len(amounts) if amounts else 0
+
+            stats_frame = ttk.Frame(chart_window)
+            stats_frame.pack(pady=5)
+
+            stats_label = ttk.Label(
+                stats_frame,
+                text=f"💰 Общая сумма расходов ТОП-20: {total_expenses:,.0f} ₽ | "
+                     f"Средний расход: {avg_expense:,.0f} ₽ | "
+                     f"Максимальный расход: {max(amounts):,.0f} ₽",
+                font=('Arial', 10, 'bold')
+            )
+            stats_label.pack()
+
+        except Exception as e:
+            messagebox.showerror("Ошибка", f"Не удалось построить график расходов:\n{str(e)}")
 
     def save_figure(self, fig, filename_prefix):
         """Сохранение графика в файл"""
